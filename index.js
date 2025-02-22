@@ -42,10 +42,22 @@ async function getGames(req, res) {
     }
 }
 
+async function getFreeGames(req, res) {
+    try {
+        const response = await fetch("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions");
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}
+
+
 
 app.get("/fetch-games", fetchGames);
 app.get("/stores", getSores);
-app.get("/game", getGames)
+app.get("/game", getGames);
+app.get("/freegames", getFreeGames);
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
