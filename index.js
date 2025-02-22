@@ -32,8 +32,20 @@ async function getSores(req, res) {
     }
 }
 
+async function getGames(req, res) {
+    try {
+        const response = await fetch(`https://www.cheapshark.com/api/1.0/games?title=${req.query.title}`);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}
+
+
 app.get("/fetch-games", fetchGames);
-app.get("/stores", getSores)
+app.get("/stores", getSores);
+app.get("/game", getGames)
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
