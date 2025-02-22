@@ -16,7 +16,7 @@ async function fetchGames(req, res) {
     try {
         const response = await fetch(`${API_URL}?key=${API_KEY}`);
         const data = await response.json();
-        res.json(data);
+        res.json({ games: data.results });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
