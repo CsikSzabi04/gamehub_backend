@@ -1,1 +1,2 @@
-https://gamehub-backend-zekj.onrender.com/fetch-games
+https://gamehub-backend-zekj.onrender.com/
+
