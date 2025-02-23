@@ -42,23 +42,22 @@ async function getGames(req, res) {
     }
 }
 
-async function getFreeGames(req, res) {
-    try {
-        const response = await fetch("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
 
 async function getNews(req, res) {
+    const url = 'https://epic-games-store.p.rapidapi.com/getNews/locale/en/limit/30';
+    const options = {
+        method: 'GET',
+        headers: {
+            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
+            'x-rapidapi-host': 'epic-games-store.p.rapidapi.com'
+        }
+    };
     try {
-        const response = await fetch("https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid=440&count=350&maxlength=300&format=json");
+        const response = await fetch(url, options);
         const data = await response.json();
         res.json(data);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error(error);
     }
 }
 
@@ -91,6 +90,7 @@ async function getFree(req, res) {
     }
 }
 
+
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
 app.get("/fetch-games", fetchGames);
 app.get("/stores", getSores);
@@ -98,6 +98,7 @@ app.get("/game", getGames);
 app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
+
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
