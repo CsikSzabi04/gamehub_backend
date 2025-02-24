@@ -98,7 +98,7 @@ function saveFav(req, resp){
         const fave = { id:nextId,  name:req.body.name}
         fav.push( fave );
         nextId++;
-        resp.send(fav)
+        resp.send(fave)
     } else resp.send( { error: 'Wrong parameters!' } )
 }
 
