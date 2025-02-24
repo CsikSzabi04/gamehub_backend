@@ -13,7 +13,7 @@ const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04
 const DATA_FILE = "games.json";
 
 let fav = [];
-let nextId = 1;
+const nextId = 1;
 
 async function fetchGames(req, res) {
     try {
@@ -116,7 +116,6 @@ function indexOf(id){
     if(i<fav.length) return i; else return -1
     
 }
-
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
 app.get("/fetch-games", fetchGames);
