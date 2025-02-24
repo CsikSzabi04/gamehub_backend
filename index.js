@@ -12,7 +12,8 @@ const API_URL = "https://api.rawg.io/api/games";
 const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04/apikey
 const DATA_FILE = "games.json";
 
-let fav = [{}]
+let fav = [{}];
+const nextId = 1;
 
 async function fetchGames(req, res) {
     try {
