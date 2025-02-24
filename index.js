@@ -13,7 +13,7 @@ const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04
 const DATA_FILE = "games.json";
 
 let fav = [{}];
-const nextId = 1;
+let nextId = 1;
 
 async function fetchGames(req, res) {
     try {
@@ -128,7 +128,7 @@ app.get("/discounted", getDiscounted);
 app.get("/health",(req,res)=>res.status(200).send("Alive"));
 app.get("/getFav", (req, res)=>res.send(fav));
 app.post("/addfav", saveFav);
-app.delete("delfav", delFav)
+app.delete("delfav/:id", delFav)
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
