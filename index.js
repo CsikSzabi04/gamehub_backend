@@ -125,7 +125,7 @@ app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
 app.get("/health",(req,res)=>res.status(200).send("Alive"));
-app.get("getFav", (req, res)=>res.send(fav));
+app.get("/getFav", (req, res)=>res.send(fav));
 app.post("/addfav", saveFav);
 app.delete("delfav", delFav)
 
