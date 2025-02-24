@@ -12,6 +12,8 @@ const API_URL = "https://api.rawg.io/api/games";
 const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04/apikey
 const DATA_FILE = "games.json";
 
+let fav = [{}]
+
 async function fetchGames(req, res) {
     try {
         const response = await fetch(`${API_URL}?key=${API_KEY}`);
@@ -90,6 +92,30 @@ async function getFree(req, res) {
     }
 }
 
+function saveFav(req, resp){
+    if(req.body.name){
+        const fave = { id:nextId,  name:req.body.name}
+        fav.push( fave );
+        nextId++;
+        resp.send(fave)
+    } else resp.send( { error: 'Wrong parameters!' } )
+}
+
+function delFav(req, resp){
+    if(req.params.id){
+        let i = indexOf(req.params.id)
+        if(i!=-1){
+            const fave = fav.splice(i, 1);
+            resp.send(fave[0]);
+        } else resp.send( { error: 'No parameters!' } )
+    }
+}
+function indexOf(id){
+    let i = 0; while(i<fav.length && fav[i].id != id) i++;
+    if(i<fav.length) return i; else return -1
+    
+}
+
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
 app.get("/fetch-games", fetchGames);
@@ -99,7 +125,8 @@ app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
 app.get("/health",(req,res)=>res.status(200).send("Alive"));
-
+app.post("/addfav", saveFav);
+app.delete("delfav", delFav)
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
