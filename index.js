@@ -98,6 +98,7 @@ app.get("/game", getGames);
 app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
+app.get("/health",(req,res)=>res.status(200).send("Alive"));
 
 
 app.listen(PORT, () => {
