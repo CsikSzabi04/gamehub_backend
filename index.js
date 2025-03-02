@@ -93,13 +93,31 @@ async function getFree(req, res) {
     }
 }
 
-function saveFav(req, resp){
-    if(req.body.name){
-        const fave = { id:nextId,  name:req.body.name}
-        fav.push( fave );
-        nextId++;
-        resp.send(fave)
-    } else resp.send( { error: 'Wrong parameters!' } )
+let userFavorites = {}; 
+let nextIdd = 1; 
+
+function saveFav(req, resp) {
+  const { name, userId } = req.body; 
+  if (name && userId) {
+    const fave = { id: nextIdd, name: name };
+    if (!userFavorites[userId]) {
+      userFavorites[userId] = [];
+    }
+    userFavorites[userId].push(fave);
+    nextIdd++; 
+    resp.send(fave); 
+  } else {
+    resp.status(400).send({ error: 'Wrong parameters!' }); 
+  }
+}
+
+function getUserFavs(req, resp) {
+  const userId = req.query.userId; 
+  if (userFavorites[userId]) {
+    resp.send(userFavorites[userId]); 
+  } else {
+    resp.send([]);
+  }
 }
 
 function delFav(req, resp){
@@ -125,7 +143,7 @@ app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
 app.get("/health",(req,res)=>res.status(200).send("Alive"));
-app.get("/getFav", (req, res)=>res.send(fav));
+app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.delete("delfav/:id", delFav)
 
