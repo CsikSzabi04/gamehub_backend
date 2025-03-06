@@ -47,12 +47,12 @@ async function getGames(req, res) {
 
 
 async function getNews(req, res) {
-    const url = 'https://epic-games-store.p.rapidapi.com/getNews/locale/en/limit/30';
+    const url = 'https://mmo-games.p.rapidapi.com/games';
     const options = {
         method: 'GET',
         headers: {
             'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
-            'x-rapidapi-host': 'epic-games-store.p.rapidapi.com'
+            'x-rapidapi-host': 'mmo-games.p.rapidapi.com'
         }
     };
     try {
@@ -93,46 +93,46 @@ async function getFree(req, res) {
     }
 }
 
-let userFavorites = {}; 
-let nextIdd = 1; 
+let userFavorites = {};
+let nextIdd = 1;
 
 function saveFav(req, resp) {
-  const { name, userId } = req.body; 
-  if (name && userId) {
-    const fave = { id: nextIdd, name: name };
-    if (!userFavorites[userId]) {
-      userFavorites[userId] = [];
+    const { name, userId } = req.body;
+    if (name && userId) {
+        const fave = { id: nextIdd, name: name };
+        if (!userFavorites[userId]) {
+            userFavorites[userId] = [];
+        }
+        userFavorites[userId].push(fave);
+        nextIdd++;
+        resp.send(fave);
+    } else {
+        resp.status(400).send({ error: 'Wrong parameters!' });
     }
-    userFavorites[userId].push(fave);
-    nextIdd++; 
-    resp.send(fave); 
-  } else {
-    resp.status(400).send({ error: 'Wrong parameters!' }); 
-  }
 }
 
 function getUserFavs(req, resp) {
-  const userId = req.query.userId; 
-  if (userFavorites[userId]) {
-    resp.send(userFavorites[userId]); 
-  } else {
-    resp.send([]);
-  }
-}
-
-function delFav(req, resp){
-    if(req.params.id){
-        let i = indexOf(req.params.id)
-        if(i!=-1){
-            const fave = fav.splice(i, 1);
-            resp.send(fave[0]);
-        } else resp.send( { error: 'No parameters!' } )
+    const userId = req.query.userId;
+    if (userFavorites[userId]) {
+        resp.send(userFavorites[userId]);
+    } else {
+        resp.send([]);
     }
 }
-function indexOf(id){
-    let i = 0; while(i<fav.length && fav[i].id != id) i++;
-    if(i<fav.length) return i; else return -1
-    
+
+function delFav(req, resp) {
+    if (req.params.id) {
+        let i = indexOf(req.params.id)
+        if (i != -1) {
+            const fave = fav.splice(i, 1);
+            resp.send(fave[0]);
+        } else resp.send({ error: 'No parameters!' })
+    }
+}
+function indexOf(id) {
+    let i = 0; while (i < fav.length && fav[i].id != id) i++;
+    if (i < fav.length) return i; else return -1
+
 }
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
@@ -142,7 +142,7 @@ app.get("/game", getGames);
 app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/discounted", getDiscounted);
-app.get("/health",(req,res)=>res.status(200).send("Alive"));
+app.get("/health", (req, res) => res.status(200).send("Alive"));
 app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.delete("delfav/:id", delFav)
