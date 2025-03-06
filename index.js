@@ -110,6 +110,25 @@ function saveFav(req, resp) {
         resp.status(400).send({ error: 'Wrong parameters!' });
     }
 }
+async function getLive(req, res) {
+    const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
+    const options = {
+        method: 'GET',
+        headers: {
+            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
+            'x-rapidapi-host': 'allsportsapi2.p.rapidapi.com'
+        }
+    };
+
+    try {
+        const response = await fetch(url, options);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error(error);
+    }
+}
+           
 
 function getUserFavs(req, resp) {
     const userId = req.query.userId;
@@ -132,7 +151,6 @@ function delFav(req, resp) {
 function indexOf(id) {
     let i = 0; while (i < fav.length && fav[i].id != id) i++;
     if (i < fav.length) return i; else return -1
-
 }
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
@@ -145,6 +163,7 @@ app.get("/discounted", getDiscounted);
 app.get("/health", (req, res) => res.status(200).send("Alive"));
 app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
+app.get("/getlive", getLive);
 app.delete("delfav/:id", delFav)
 
 app.listen(PORT, () => {
