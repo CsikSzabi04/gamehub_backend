@@ -128,6 +128,28 @@ async function getLive(req, res) {
         console.error(error);
     }
 }
+
+async function getLoot(req, res) {
+    const url = 'https://gamerpower.p.rapidapi.com/api/filter?platform=epic-games-store.steam.android&type=game.loot';
+    const options = {
+        method: 'GET',
+        headers: {
+            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
+            'x-rapidapi-host': 'gamerpower.p.rapidapi.com'
+        }
+    };
+
+    try {
+        const response = await fetch(url, options);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+
+
            
 
 function getUserFavs(req, resp) {
@@ -159,6 +181,7 @@ app.get("/stores", getSores);
 app.get("/game", getGames);
 app.get("/news", getNews);
 app.get("/free", getFree);
+app.get("/loot", getLoot);
 app.get("/discounted", getDiscounted);
 app.get("/health", (req, res) => res.status(200).send("Alive"));
 app.get("/getFav", getUserFavs);
