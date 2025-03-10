@@ -93,7 +93,7 @@ async function getFree(req, res) {
     }
 }
 
-let userFavorites = {};
+let userFavorites = [];
 let nextIdd = 1;
 
 function saveFav(req, resp) {
@@ -110,6 +110,8 @@ function saveFav(req, resp) {
         resp.status(400).send({ error: 'Wrong parameters!' });
     }
 }
+
+
 async function getLive(req, res) {
     const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
     const options = {
@@ -147,9 +149,6 @@ async function getLoot(req, res) {
         console.error(error);
     }
 }
-
-
-
            
 
 function getUserFavs(req, resp) {
@@ -165,15 +164,16 @@ function delFav(req, resp) {
     if (req.params.id) {
         let i = indexOf(req.params.id)
         if (i != -1) {
-            const fave = fav.splice(i, 1);
+            const fave = userFavorites.splice(i, 1);
             resp.send(fave[0]);
         } else resp.send({ error: 'No parameters!' })
     }
 }
 function indexOf(id) {
-    let i = 0; while (i < fav.length && fav[i].id != id) i++;
-    if (i < fav.length) return i; else return -1
+    let i = 0; while (i < userFavorites.length && userFavorites[i].id != id) i++;
+    if (i < userFavorites.length) return i; else return -1
 }
+
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
 app.get("/fetch-games", fetchGames);
@@ -187,7 +187,7 @@ app.get("/health", (req, res) => res.status(200).send("Alive"));
 app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.get("/getlive", getLive);
-app.delete("delfav/:id", delFav)
+app.delete("delfav/:id", delFav);
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
