@@ -179,9 +179,9 @@ async function getGaminNews(req, resp) {
     try {
         const response = await fetch("https://newsapi.org/v2/everything?q=Gaming&apiKey=58cd8c33334d4de7a425f8a1c08a3a35");
         const data = await response.json();
-        res.json(data);
+        resp.json(data);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        resp.status(500).json({ error: error.message });
     }
 }
 
