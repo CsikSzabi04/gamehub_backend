@@ -150,7 +150,7 @@ async function getLoot(req, res) {
 
 
 
-           
+
 
 function getUserFavs(req, resp) {
     const userId = req.query.userId;
@@ -185,6 +185,41 @@ async function getGaminNews(req, resp) {
     }
 }
 
+let reviewsData = {};
+let nextReviewId = 1;
+
+function saveReview(req, resp) {
+    const { gameId, userId, email, reviewText, rating, gameName } = req.body;
+
+    const newReview = {
+        id: nextReviewId,
+        gameId,
+        gameName, 
+        userId,
+        email,
+        review: reviewText,
+        rating,
+        createdAt: new Date(),
+    };
+
+    if (!reviewsData[gameId]) {
+        reviewsData[gameId] = [];
+    }
+    reviewsData[gameId].push(newReview);
+    nextReviewId++;
+
+    resp.send(newReview);
+}
+
+
+function getAllReviews(req, resp) {
+    let allReviews = [];
+    for (let gameId in reviewsData) {
+        allReviews = allReviews.concat(reviewsData[gameId]);
+    }
+    resp.json(allReviews);  
+}
+
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
 app.get("/fetch-games", fetchGames);
 app.get("/stores", getSores);
@@ -198,7 +233,9 @@ app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.get("/getlive", getLive);
 app.get("/getgamingnews", getGaminNews);
-app.delete("delfav/:id", delFav)
+app.delete("delfav/:id", delFav);
+app.post('/submit-review', saveReview);
+app.get('/get-all-reviews', getAllReviews); 
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
