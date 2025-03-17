@@ -96,6 +96,8 @@ async function getFree(req, res) {
 let userFavorites = {};
 let nextIdd = 1;
 
+let favourite=[]
+
 function saveFav(req, resp) {
     const { name, userId } = req.body;
     if (name && userId) {
@@ -103,6 +105,7 @@ function saveFav(req, resp) {
         if (!userFavorites[userId]) {
             userFavorites[userId] = [];
         }
+        favourite.push(fave)
         userFavorites[userId].push(fave);
         nextIdd++;
         resp.send(fave);
@@ -162,17 +165,21 @@ function getUserFavs(req, resp) {
 }
 
 function delFav(req, resp) {
+    console.log(userFavorites)
+    console.log(fav)
+    console.log(favourite)
     if (req.params.id) {
         let i = indexOf(req.params.id)
         if (i != -1) {
-            const fave = fav.splice(i, 1);
-            resp.send(fave[0]);
+            favourite.splice(i, 1);
+            resp.send(favourite);
         } else resp.send({ error: 'No parameters!' })
     }
+   resp.send("OK")
 }
 function indexOf(id) {
-    let i = 0; while (i < fav.length && fav[i].id != id) i++;
-    if (i < fav.length) return i; else return -1
+    let i = 0; while (i < favourite.length && favourite[i].id != id) i++;
+    if (i < favourite.length) return i; else return -1
 }
 
 async function getGaminNews(req, resp) {
@@ -233,7 +240,7 @@ app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.get("/getlive", getLive);
 app.get("/getgamingnews", getGaminNews);
-app.delete("delfav/:id", delFav);
+app.delete("/delfav/:id", delFav);
 app.post('/submit-review', saveReview);
 app.get('/get-all-reviews', getAllReviews); 
 
