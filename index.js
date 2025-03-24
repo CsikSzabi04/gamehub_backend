@@ -12,7 +12,7 @@ const API_URL = "https://api.rawg.io/api/games";
 const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04/apikey
 const DATA_FILE = "games.json";
 
-let fav = [];
+
 const nextId = 1;
 
 async function fetchGames(req, res) {
@@ -93,26 +93,7 @@ async function getFree(req, res) {
     }
 }
 
-let userFavorites = {};
-let nextIdd = 1;
 
-let favourite=[]
-
-function saveFav(req, resp) {
-    const { name, userId } = req.body;
-    if (name && userId) {
-        const fave = { id: nextIdd, name: name };
-        if (!userFavorites[userId]) {
-            userFavorites[userId] = [];
-        }
-        favourite.push(fave)
-        userFavorites[userId].push(fave);
-        nextIdd++;
-        resp.send(fave);
-    } else {
-        resp.status(400).send({ error: 'Wrong parameters!' });
-    }
-}
 async function getLive(req, res) {
     const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
     const options = {
@@ -157,29 +138,43 @@ async function getLoot(req, res) {
 
 function getUserFavs(req, resp) {
     const userId = req.query.userId;
-    if (userFavorites[userId]) {
-        resp.send(userFavorites[userId]);
+    if (favourite[userId]) {
+        resp.send(favourite[userId]);
     } else {
         resp.send([]);
     }
 }
 
-function delFav(req, resp) {
-    console.log(userFavorites)
-    console.log(fav)
-    console.log(favourite)
-    if (req.params.id) {
-        let i = indexOf(req.params.id)
-        if (i != -1) {
-            favourite.splice(i, 1);
-            resp.send(favourite);
-        } else resp.send({ error: 'No parameters!' })
+
+
+let favourite={}
+
+function saveFav(req, resp) {
+    const { name, userId,gameId } = req.body;
+    if (name && userId && gameId) {
+        const fave = { gameId:gameId , name: name };
+        if (!favourite[userId]) {
+            favourite[userId] = [];
+        }
+        favourite[userId].push(fave);
+        resp.send(fave);
+    } else {
+        resp.status(400).send({ error: 'Wrong parameters!' });
     }
-   resp.send("OK")
 }
-function indexOf(id) {
-    let i = 0; while (i < favourite.length && favourite[i].id != id) i++;
-    if (i < favourite.length) return i; else return -1
+
+function delFav(req, resp) {
+    if (req.params.gameId && req.body.userId) {
+        let i = indexOf(req.params.gameId,req.body.userId)    
+            if(i != -1){
+                favourite[req.body.userId].splice(i,1)
+                resp.send("OK")
+            }else resp.send({ error: 'No avaible ID!' })
+    }else resp.status(400).send({error:"Missing paramters!"})
+}
+function indexOf(id,userId) {
+   let i = 0; while (i < favourite[userId].length && favourite[userId][i].gameId != id) i++;
+   if (i < favourite[userId].length) return i; else return -1
 }
 
 async function getGaminNews(req, resp) {
@@ -240,7 +235,7 @@ app.get("/getFav", getUserFavs);
 app.post("/addfav", saveFav);
 app.get("/getlive", getLive);
 app.get("/getgamingnews", getGaminNews);
-app.delete("/delfav/:id", delFav);
+app.delete("/delfav/:gameId", delFav);
 app.post('/submit-review', saveReview);
 app.get('/get-all-reviews', getAllReviews); 
 
