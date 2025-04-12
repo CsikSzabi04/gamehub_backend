@@ -6,14 +6,9 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-
 const PORT = 88;
 const API_URL = "https://api.rawg.io/api/games";
 const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04/apikey
-const DATA_FILE = "games.json";
-
-
-const nextId = 1;
 
 async function fetchGames(req, res) {
     try {
@@ -44,7 +39,6 @@ async function getGames(req, res) {
         res.status(500).json({ error: error.message });
     }
 }
-
 
 async function getNews(req, res) {
     const url = 'https://mmo-games.p.rapidapi.com/games';
@@ -83,7 +77,6 @@ async function getFree(req, res) {
             'x-rapidapi-host': 'free-to-play-games-database.p.rapidapi.com'
         }
     };
-
     try {
         const response = await fetch(url, options);
         const data = await response.json();
@@ -103,7 +96,6 @@ async function getLive(req, res) {
             'x-rapidapi-host': 'allsportsapi2.p.rapidapi.com'
         }
     };
-
     try {
         const response = await fetch(url, options);
         const data = await response.json();
@@ -122,7 +114,6 @@ async function getLoot(req, res) {
             'x-rapidapi-host': 'gamerpower.p.rapidapi.com'
         }
     };
-
     try {
         const response = await fetch(url, options);
         const data = await response.json();
@@ -131,10 +122,6 @@ async function getLoot(req, res) {
         console.error(error);
     }
 }
-
-
-
-
 
 function getUserFavs(req, resp) {
     const userId = req.query.userId;
@@ -145,10 +132,7 @@ function getUserFavs(req, resp) {
     }
 }
 
-
-
 let favourite={}
-
 function saveFav(req, resp) {
     const { name, userId,gameId } = req.body;
     if (name && userId && gameId) {
@@ -172,6 +156,7 @@ function delFav(req, resp) {
             }else resp.send({ error: 'No avaible ID!' })
     }else resp.status(400).send({error:"Missing paramters!"})
 }
+
 function indexOf(id,userId) {
    let i = 0; while (i < favourite[userId].length && favourite[userId][i].gameId != id) i++;
    if (i < favourite[userId].length) return i; else return -1
@@ -187,12 +172,10 @@ async function getGaminNews(req, resp) {
     }
 }
 
-let reviewsData = {};
-let nextReviewId = 1;
+let reviewsData = {}; let nextReviewId = 1;
 
 function saveReview(req, resp) {
     const { gameId, userId, email, reviewText, rating, gameName } = req.body;
-
     const newReview = {
         id: nextReviewId,
         gameId,
@@ -203,16 +186,11 @@ function saveReview(req, resp) {
         rating,
         createdAt: new Date(),
     };
-
-    if (!reviewsData[gameId]) {
-        reviewsData[gameId] = [];
-    }
+    if (!reviewsData[gameId]) {reviewsData[gameId] = [];}
     reviewsData[gameId].push(newReview);
     nextReviewId++;
-
     resp.send(newReview);
 }
-
 
 function getAllReviews(req, resp) {
     let allReviews = [];
@@ -223,21 +201,22 @@ function getAllReviews(req, resp) {
 }
 
 app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
+app.get("/health", (req, res) => res.status(200).send("Alive"));
+app.get('/get-all-reviews', getAllReviews); 
+app.get("/getgamingnews", getGaminNews);
+app.get("/discounted", getDiscounted);
 app.get("/fetch-games", fetchGames);
+app.get("/getFav", getUserFavs);
 app.get("/stores", getSores);
+app.get("/getlive", getLive);
 app.get("/game", getGames);
 app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/loot", getLoot);
-app.get("/discounted", getDiscounted);
-app.get("/health", (req, res) => res.status(200).send("Alive"));
-app.get("/getFav", getUserFavs);
-app.post("/addfav", saveFav);
-app.get("/getlive", getLive);
-app.get("/getgamingnews", getGaminNews);
-app.delete("/delfav/:gameId", delFav);
+
 app.post('/submit-review', saveReview);
-app.get('/get-all-reviews', getAllReviews); 
+app.delete("/delfav/:gameId", delFav);
+app.post("/addfav", saveFav);
 
 app.listen(PORT, () => {
     console.log(`Server running on port :${PORT}`);
