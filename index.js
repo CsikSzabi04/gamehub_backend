@@ -214,6 +214,8 @@ app.get("/news", getNews);
 app.get("/free", getFree);
 app.get("/loot", getLoot);
 
+app.use((req, res, next) => {res.set('Cache-Control', 'public, max-age=3600');next();});
+
 app.post('/submit-review', saveReview);
 app.delete("/delfav/:gameId", delFav);
 app.post("/addfav", saveFav);
