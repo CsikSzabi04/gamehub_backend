@@ -20,9 +20,6 @@ https://gamehub-backend-zekj.onrender.com/
 
 - Játékhoz írt értékelések mentése és lekérdezése
 
----
-![image](https://github.com/user-attachments/assets/b8c08b89-6683-473d-9388-f027a11755b3)
----
 
 ## API végpontok (route-ok)
 
@@ -72,6 +69,54 @@ https://gamehub-backend-zekj.onrender.com/
 
 Több külső API-hoz használ kulcsokat (RAWG, RapidAPI, NewsAPI). Ezekkel lehet elérni a különböző szolgáltatásokat. Fontos, hogy ezek titkosan legyenek kezelve éles környezetben (ne hardcode-olva).
 
+---
+
+## Tesztelés
+
+## Főbb funkciók
+- Játékadatok kezelése
+- Digitális játékboltok listázása
+- Ingyenes játékok és akciók nyomon követése
+- Játékhírek gyűjtése
+- eSport meccsek adatai
+- Felhasználói kedvencek kezelése
+- Játékértékelések kezelése
+
+## API Végpontok
+
+### Játékadatok
+| Végpont | Metódus | Leírás |
+|---------|---------|--------|
+| `/fetch-games` | GET | Legnépszerűbb játékok lekérése |
+| `/game?title={cím}` | GET | Játék keresése cím alapján |
+
+### Boltok és akciók
+| `/stores` | GET | Digitális játékboltok listája |
+| `/free` | GET | Ingyenes játékok listája |
+| `/discounted` | GET | Akciós játékok listája |
+
+### Felhasználói funkciók
+| `/getFav?userId={azonosító}` | GET | Felhasználó kedvenceinek lekérése |
+| `/addfav` | POST | Játék hozzáadása a kedvencekhez |
+| `/delfav/{játékAzonosító}` | DELETE | Játék eltávolítása a kedvencekből |
+
+### Értékelések
+| `/submit-review` | POST | Játékértékelés beküldése |
+| `/get-all-reviews` | GET | Összes értékelés lekérése |
+
+## Adatkezelés
+- Kedvencek és értékelések a szerver memóriájában tárolva (ideiglenes)
+- Külső API-k használata játékadatokhoz és hírekhez
+- API kulcsok szükségesek külső szolgáltatásokhoz
+
+## Fejlesztési környezet
+- Node.js + Express
+- node-fetch API kérésekhez
+- CORS middleware
+
+---
+![image](https://github.com/user-attachments/assets/b8c08b89-6683-473d-9388-f027a11755b3)
+---
 ---
 
 ## Backend Fejlesztési Eszközök
