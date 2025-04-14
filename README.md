@@ -2,7 +2,7 @@ https://gamehub-backend-zekj.onrender.com/
 
 ---
 
-## 🎮 Fő funkciók
+## Fő funkciók
 
 - A szerver többféle adatot gyűjt és szolgáltat, például:
 
@@ -21,8 +21,10 @@ https://gamehub-backend-zekj.onrender.com/
 - Játékhoz írt értékelések mentése és lekérdezése
 
 ---
+![image](https://github.com/user-attachments/assets/b8c08b89-6683-473d-9388-f027a11755b3)
+---
 
-## 📡 API végpontok (route-ok)
+## API végpontok (route-ok)
 
 - **HTTP Módszer	Útvonal	Leírás**
 - **GET	/fetch-games**	Lekéri a legnépszerűbb játékokat a RAWG API-ból
@@ -58,7 +60,7 @@ https://gamehub-backend-zekj.onrender.com/
 
 ---
 
-## 💾 Adatok kezelése
+## Adatok kezelése
 
 - A kedvenceket és értékeléseket szerver memóriában (favourite, reviewsData) tárolja, tehát újraindítás után ezek elvesznek, hacsak nincs külső adatbázis.
 
@@ -66,18 +68,16 @@ https://gamehub-backend-zekj.onrender.com/
 
 ---
 
-## 🔐 API kulcsok
+## API kulcsok
 
 Több külső API-hoz használ kulcsokat (RAWG, RapidAPI, NewsAPI). Ezekkel lehet elérni a különböző szolgáltatásokat. Fontos, hogy ezek titkosan legyenek kezelve éles környezetben (ne hardcode-olva).
 
 ---
 
-## 🛠️ Technológiák
+## Backend Fejlesztési Eszközök
 
 - express – Webszerver keretrendszer
 
 - node-fetch – Külső API-k eléréséhez
 
 - cors – Kereszt-domain kérések engedélyezéséhez (pl. frontendről)
-
-
