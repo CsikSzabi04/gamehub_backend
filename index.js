@@ -75,6 +75,63 @@ fs.readFile('killers.json', 'utf-8', (error, data) => {
     }
 });
 
+let survivorPerks = [];
+let nextSurvivorPerkId = 0;
+
+fs.readFile('survivorperks.json', 'utf-8', (error, data) => {
+    if (error) {
+        console.error('Error reading survivor perks file:', error);
+    } else {
+        try {
+            const perksData = JSON.parse(data);
+            survivorPerks = perksData.map(perk => {
+                const id = perk.id ? perk.id : ++nextSurvivorPerkId;
+                if (id > nextSurvivorPerkId) nextSurvivorPerkId = id;
+                return {
+                    id: id,
+                    name: perk.name,
+                    code: perk.code,
+                    survivorCode: perk.survivorCode,
+                    survivorName: perk.survivorName,
+                    description: perk.description,
+                    icon: perk.icon
+                };
+            });
+        } catch (parseError) {
+            console.error('Error parsing survivor perks JSON:', parseError);
+        }
+    }
+});
+
+
+let killerPerks = [];
+let nextKillerPerkId = 0;
+
+fs.readFile('killerperks.json', 'utf-8', (error, data) => {
+    if (error) {
+        console.error('Error reading killer perks file:', error);
+    } else {
+        try {
+            const perksData = JSON.parse(data);
+            killerPerks = perksData.map(perk => {
+                const id = perk.id ? perk.id : ++nextKillerPerkId;
+                if (id > nextKillerPerkId) nextKillerPerkId = id;
+                return {
+                    id: id,
+                    name: perk.name,
+                    code: perk.code,
+                    killerCode: perk.killerCode,
+                    killerName: perk.killerName,
+                    description: perk.description,
+                    icon: perk.icon
+                };
+            });
+        } catch (parseError) {
+            console.error('Error parsing killer perks JSON:', parseError);
+        }
+    }
+});
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -436,15 +493,60 @@ async function getDbdCharatchersK(req, res) {
     res.json(dbdCharactersK);
 }
 
-async function getDbdPerks(req, res) {
+
+let survivorPerksS = [];
+let killerPerksK = [];
+function loadPerkData() {
+    return new Promise((resolve, reject) => {
+        fs.readFile('survivorperks.json', 'utf-8', (error, data) => {
+            try {
+                survivorPerksS = JSON.parse(data); 
+                fs.readFile('killerperks.json', 'utf-8', (error, data) => {
+                    try {
+                        killerPerksK = JSON.parse(data);
+                        resolve();
+                    } catch (parseError) {
+                        reject(parseError);
+                    }
+                });
+            } catch (parseError) {
+                reject(parseError);
+            }
+        });
+    });
+}
+loadPerkData();
+
+async function getDbdPerksSByName(req, res) {
     try {
-        const response = await fetch("https://dbd.tricky.lol/api/perks");
-        const data = await response.json();
-        res.json(data);
+        const perkName = req.params.name.toLowerCase();
+        const perk = survivorPerksS.find(p => p.name.toLowerCase() == perkName);
+        
+        if (perk) {
+            res.json(perk);
+        } else {
+            res.status(404).json({ error: "Survivor perk not found" });
+        }
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 }
+
+async function getDbdPerksKByName(req, res) {
+    try {
+        const perkName = req.params.name.toLowerCase();
+        const perk = killerPerksK.find(p => p.name.toLowerCase() == perkName);
+        
+        if (perk) {
+            res.json(perk);
+        } else {
+            res.status(404).json({ error: "Killer perk not found" });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}
+
 
 async function getDbdEvents(req, res) {
     try {
@@ -514,7 +616,8 @@ app.get('/top-rated-movies', getTopRatedMovies);
 
 app.get("/characters", getDbdCharatchers);
 app.get("/charactersK", getDbdCharatchersK);
-app.get('/perks', getDbdPerks);
+app.get('/perksS/:name', getDbdPerksSByName);
+app.get('/perksK/:name', getDbdPerksKByName);
 app.get('/events', getDbdEvents);
 app.get('/addons', getDbdAddons);
 app.get('/dlc', getDbdDlc);
