@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: gamehub-backend
+    runtime: node
+    region: oregon
+    plan: free
+    autoDeploy: true
+    
+    buildCommand: npm install
+    startCommand: npm start
+    
+    healthCheckPath: /health
+    healthCheckInterval: 30
+    
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: true
+      
+      # API Keys (set these in Render dashboard)
+      - key: RAWG_API_KEY
+        sync: false
+      - key: RAPIDAPI_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: TMDB_API_TOKEN
+        sync: false
+      
+      # Cache Duration
+      - key: CACHE_DURATION_EXTERNAL_API
+        value: "600"
+      - key: CACHE_DURATION_MOVIES
+        value: "1800"
+      - key: CACHE_DURATION_NEWS
+        value: "900"
+      
+      # CORS
+      - key: CORS_ORIGIN
+        value: "*"

@@ -1,634 +1,693 @@
-import express from "express";
-import fetch from "node-fetch";
-import cors from "cors";
-import fs from "fs";
-import path from "path";
+import express from 'express';
+import cors from 'cors';
+import compression from 'compression';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-let dbdCharacters = [];
-let nextId = 0;
+import { config } from './config.js';
+import { cache, cacheMiddleware } from './cache.js';
+import { fetchAPI, errorResponse, successResponse, validateInput, safeJsonParse, findIndex } from './utils.js';
 
-fs.readFile('survivors.json', 'utf-8', (error, data) => {
-    if (error) {
-        console.error('Error reading characters file:', error);
-    } else {
-        try {
-            const charactersData = JSON.parse(data);
-            dbdCharacters = Object.values(charactersData).map(char => {
-                const id = char.id ? char.id : ++nextId;
-                if (id > nextId) nextId = id;
-                return {
-                    id: id,
-                    name: char.name,
-                    role: char.role,
-                    difficulty: char.difficulty,
-                    nationality: char.nationality,
-                    dlc:char.dlc,
-                    perks: char.perks_names,
-                    overview: char.overview,
-                    backstory:  char.backstory,
-                    gender: char.gender,
-                    imgs: char.imgs.portrait
-                };
-            });            
-        } catch (parseError) {
-            console.error('Error parsing JSON:', parseError);
-        }
-    }
-});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-let dbdCharactersK = [];
-let nextIdd = 0;
-
-fs.readFile('killers.json', 'utf-8', (error, data) => {
-    if (error) {
-        console.error('Error reading characters file:', error);
-    } else {
-        try {
-            const charactersData = JSON.parse(data);
-            dbdCharactersK = Object.values(charactersData).map(char => {
-                const id = char.id ? char.id : ++nextIdd;
-                if (id > nextIdd) nextIdd = id;
-                return {
-                    id: id,
-                    name: char.name,
-                    fullname: char.fullName,
-                    difficulty: char.difficulty,
-                    nationality: char.nationality,
-                    realm: char.realm,
-                    powerAttackType: char.powerAttackType,
-                    weapon: char.weapon,
-                    moveSpeed: char.moveSpeed,
-                    terrorRadius: char.terrorRadius,
-                    height:char.height,
-                    power:char.power.powerName,
-                    dlc:char.dlc,
-                    perks: char.perks_names,
-                    overview: char.overview,
-                    backstory:  char.backstory,
-                    gender: char.gender,
-                    imgs: char.imgs.portrait
-                };
-            });            
-        } catch (parseError) {
-            console.error('Error parsing JSON:', parseError);
-        }
-    }
-});
-
-let survivorPerks = [];
-let nextSurvivorPerkId = 0;
-
-fs.readFile('survivorperks.json', 'utf-8', (error, data) => {
-    if (error) {
-        console.error('Error reading survivor perks file:', error);
-    } else {
-        try {
-            const perksData = JSON.parse(data);
-            survivorPerks = perksData.map(perk => {
-                const id = perk.id ? perk.id : ++nextSurvivorPerkId;
-                if (id > nextSurvivorPerkId) nextSurvivorPerkId = id;
-                return {
-                    id: id,
-                    name: perk.name,
-                    code: perk.code,
-                    survivorCode: perk.survivorCode,
-                    survivorName: perk.survivorName,
-                    description: perk.description,
-                    icon: perk.icon
-                };
-            });
-        } catch (parseError) {
-            console.error('Error parsing survivor perks JSON:', parseError);
-        }
-    }
-});
-
-
-let killerPerks = [];
-let nextKillerPerkId = 0;
-
-fs.readFile('killerperks.json', 'utf-8', (error, data) => {
-    if (error) {
-        console.error('Error reading killer perks file:', error);
-    } else {
-        try {
-            const perksData = JSON.parse(data);
-            killerPerks = perksData.map(perk => {
-                const id = perk.id ? perk.id : ++nextKillerPerkId;
-                if (id > nextKillerPerkId) nextKillerPerkId = id;
-                return {
-                    id: id,
-                    name: perk.name,
-                    code: perk.code,
-                    killerCode: perk.killerCode,
-                    killerName: perk.killerName,
-                    description: perk.description,
-                    icon: perk.icon
-                };
-            });
-        } catch (parseError) {
-            console.error('Error parsing killer perks JSON:', parseError);
-        }
-    }
-});
-
+// Initialize Express app
 const app = express();
+
+// ━━━━━━━━━━━━━━━━ MIDDLEWARE ━━━━━━━━━━━━━━━━
+
+// Performance middleware - order matters!
+app.use(compression());
 app.use(express.json());
-app.use(cors());
+app.use(cors(config.cors));
 
-const PORT = 88;
-const API_URL = "https://api.rawg.io/api/games";
-const API_KEY = "984255fceb114b05b5e746dc24a8520a"; //https://rawg.io/@csszabj04/apikey
+// Cache middleware for GET requests
+app.use((req, res, next) => {
+  if (req.method === 'GET') {
+    res.set('Cache-Control', 'public, max-age=3600');
+  }
+  next();
+});
 
-//----------------------------------------------------------------------- GameDataHub ----------------------------------------------------------------------------------------------------------------------------------------------
+// ━━━━━━━━━━━━━━━━ DATA STORAGE ━━━━━━━━━━━━━━━━
 
-async function fetchGames(req, res) {
-    try {
-        const response = await fetch(`${API_URL}?key=${API_KEY}`);
-        const data = await response.json();
-        res.json({ games: data.results });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+const dataStore = {
+  survivors: [],
+  killers: [],
+  survivorPerks: [],
+  killerPerks: [],
+  userFavorites: {},
+  reviews: {}
+};
+
+let nextId = {
+  survivor: 0,
+  killer: 0,
+  survivorPerk: 0,
+  killerPerk: 0,
+  review: 1
+};
+
+// ━━━━━━━━━━━━━━━━ DATA LOADING ━━━━━━━━━━━━━━━━
+
+/**
+ * Load all JSON files in parallel
+ */
+async function loadAllData() {
+  try {
+    console.log('Loading game data...');
+
+    const [survivorsData, killersData, survivorPerksData, killerPerksData] = await Promise.all([
+      fs.readFile(path.join(__dirname, 'survivors.json'), 'utf-8'),
+      fs.readFile(path.join(__dirname, 'killers.json'), 'utf-8'),
+      fs.readFile(path.join(__dirname, 'survivorperks.json'), 'utf-8'),
+      fs.readFile(path.join(__dirname, 'killerperks.json'), 'utf-8')
+    ]);
+
+    // Process survivors
+    const survivors = safeJsonParse(survivorsData, {});
+    dataStore.survivors = Object.values(survivors).map(char => {
+      const id = char.id || ++nextId.survivor;
+      if (id > nextId.survivor) nextId.survivor = id;
+      return {
+        id,
+        name: char.name || '',
+        role: char.role || 'survivor',
+        difficulty: char.difficulty || '',
+        nationality: char.nationality || '',
+        dlc: char.dlc || '',
+        perks: char.perks_names || [],
+        overview: char.overview || '',
+        backstory: char.backstory || '',
+        gender: char.gender || '',
+        imgs: char.imgs?.portrait || ''
+      };
+    });
+
+    // Process killers
+    const killers = safeJsonParse(killersData, {});
+    dataStore.killers = Object.values(killers).map(char => {
+      const id = char.id || ++nextId.killer;
+      if (id > nextId.killer) nextId.killer = id;
+      return {
+        id,
+        name: char.name || '',
+        fullname: char.fullName || '',
+        difficulty: char.difficulty || '',
+        nationality: char.nationality || '',
+        realm: char.realm || '',
+        powerAttackType: char.powerAttackType || '',
+        weapon: char.weapon || '',
+        moveSpeed: char.moveSpeed || '',
+        terrorRadius: char.terrorRadius || '',
+        height: char.height || '',
+        power: char.power?.powerName || '',
+        dlc: char.dlc || '',
+        perks: char.perks_names || [],
+        overview: char.overview || '',
+        backstory: char.backstory || '',
+        gender: char.gender || '',
+        imgs: char.imgs?.portrait || ''
+      };
+    });
+
+    // Process survivor perks
+    const survivorPerks = safeJsonParse(survivorPerksData, []);
+    dataStore.survivorPerks = survivorPerks.map(perk => {
+      const id = perk.id || ++nextId.survivorPerk;
+      if (id > nextId.survivorPerk) nextId.survivorPerk = id;
+      return {
+        id,
+        name: perk.name || '',
+        code: perk.code || '',
+        survivorCode: perk.survivorCode || '',
+        survivorName: perk.survivorName || '',
+        description: perk.description || '',
+        icon: perk.icon || ''
+      };
+    });
+
+    // Process killer perks
+    const killerPerks = safeJsonParse(killerPerksData, []);
+    dataStore.killerPerks = killerPerks.map(perk => {
+      const id = perk.id || ++nextId.killerPerk;
+      if (id > nextId.killerPerk) nextId.killerPerk = id;
+      return {
+        id,
+        name: perk.name || '',
+        code: perk.code || '',
+        killerCode: perk.killerCode || '',
+        killerName: perk.killerName || '',
+        description: perk.description || '',
+        icon: perk.icon || ''
+      };
+    });
+
+    console.log(`✓ Loaded ${dataStore.survivors.length} survivors`);
+    console.log(`✓ Loaded ${dataStore.killers.length} killers`);
+    console.log(`✓ Loaded ${dataStore.survivorPerks.length} survivor perks`);
+    console.log(`✓ Loaded ${dataStore.killerPerks.length} killer perks`);
+
+  } catch (error) {
+    console.error('Error loading data:', error);
+    process.exit(1);
+  }
 }
 
-async function getSores(req, res) {
-    try {
-        const response = await fetch("https://www.cheapshark.com/api/1.0/stores");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
+// ━━━━━━━━━━━━━━━━ GAME HUB ENDPOINTS ━━━━━━━━━━━━━━━━
 
-async function getGames(req, res) {
-    try {
-        const response = await fetch(`https://www.cheapshark.com/api/1.0/games?title=${req.query.title}`);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
+/**
+ * Fetch popular games from RAWG API
+ */
+app.get('/fetch-games', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
+    const data = await fetchAPI(`${config.apis.rawg.url}?key=${config.apis.rawg.key}`);
+    res.json({ games: data.results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-async function getNews(req, res) {
+/**
+ * Get digital stores
+ */
+app.get('/stores', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
+    const data = await fetchAPI(`${config.apis.cheapshark.url}/stores`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Search games by title
+ */
+app.get('/game', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
+    const { title } = req.query;
+    if (!title) return res.status(400).json({ error: 'Title parameter is required' });
+
+    const data = await fetchAPI(`${config.apis.cheapshark.url}/games?title=${encodeURIComponent(title)}`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get MMO games news
+ */
+app.get('/news', cacheMiddleware(config.cache.news), async (req, res) => {
+  try {
+    const options = {
+      headers: {
+        'x-rapidapi-key': config.apis.rapid.key,
+        'x-rapidapi-host': config.apis.rapid.hosts.mmo
+      }
+    };
     const url = 'https://mmo-games.p.rapidapi.com/games';
+    const data = await fetchAPI(url, options, config.cache.news);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get free-to-play games
+ */
+app.get('/free', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
     const options = {
-        method: 'GET',
-        headers: {
-            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
-            'x-rapidapi-host': 'mmo-games.p.rapidapi.com'
-        }
+      headers: {
+        'x-rapidapi-key': config.apis.rapid.key,
+        'x-rapidapi-host': config.apis.rapid.hosts.games
+      }
     };
-    try {
-        const response = await fetch(url, options);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-async function getDiscounted(req, res) {
-    try {
-        const response = await fetch("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-async function getFree(req, res) {
     const url = 'https://free-to-play-games-database.p.rapidapi.com/api/games';
+    const data = await fetchAPI(url, options, config.cache.externalApi);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get loot offers
+ */
+app.get('/loot', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
     const options = {
-        method: 'GET',
-        headers: {
-            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
-            'x-rapidapi-host': 'free-to-play-games-database.p.rapidapi.com'
-        }
+      headers: {
+        'x-rapidapi-key': config.apis.rapid.key,
+        'x-rapidapi-host': config.apis.rapid.hosts.loot
+      }
     };
-    try {
-        const response = await fetch(url, options);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-
-async function getLive(req, res) {
-    const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
-    const options = {
-        method: 'GET',
-        headers: {
-            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
-            'x-rapidapi-host': 'allsportsapi2.p.rapidapi.com'
-        }
-    };
-    try {
-        const response = await fetch(url, options);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-async function getLoot(req, res) {
     const url = 'https://gamerpower.p.rapidapi.com/api/filter?platform=epic-games-store.steam.android&type=game.loot';
+    const data = await fetchAPI(url, options, config.cache.externalApi);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get live esports matches
+ */
+app.get('/getlive', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
     const options = {
-        method: 'GET',
-        headers: {
-            'x-rapidapi-key': 'b05744bab0mshe91c13f2d427740p11f35djsnacb7b089052e',
-            'x-rapidapi-host': 'gamerpower.p.rapidapi.com'
-        }
+      headers: {
+        'x-rapidapi-key': config.apis.rapid.key,
+        'x-rapidapi-host': config.apis.rapid.hosts.sports
+      }
     };
-    try {
-        const response = await fetch(url, options);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error(error);
-    }
-}
+    const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
+    const data = await fetchAPI(url, options, config.cache.externalApi);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-function getUserFavs(req, resp) {
-    const userId = req.query.userId;
-    if (favourite[userId]) {
-        resp.send(favourite[userId]);
-    } else {
-        resp.send([]);
-    }
-}
+/**
+ * Get Epic Games discounted games
+ */
+app.get('/discounted', cacheMiddleware(config.cache.externalApi), async (req, res) => {
+  try {
+    const data = await fetchAPI(config.apis.epicgames.url);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-let favourite = {}
-function saveFav(req, resp) {
+/**
+ * Get gaming news
+ */
+app.get('/getgamingnews', cacheMiddleware(config.cache.news), async (req, res) => {
+  try {
+    const url = `https://newsapi.org/v2/everything?q=Gaming&apiKey=${config.apis.newsapi.key}`;
+    const data = await fetchAPI(url, {}, config.cache.news);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ━━━━━━━━━━━━━━━━ FAVORITES ENDPOINTS ━━━━━━━━━━━━━━━━
+
+/**
+ * Get user favorites
+ */
+app.get('/getFav', (req, res) => {
+  try {
+    const { userId } = req.query;
+    const favorites = dataStore.userFavorites[userId] || [];
+    res.send(favorites);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Add favorite game
+ */
+app.post('/addfav', (req, res) => {
+  try {
     const { name, userId, gameId } = req.body;
     if (name && userId && gameId) {
-        const fave = { gameId: gameId, name: name };
-        if (!favourite[userId]) {
-            favourite[userId] = [];
-        }
-        favourite[userId].push(fave);
-        resp.send(fave);
+      const fave = { gameId: gameId, name: name };
+      if (!dataStore.userFavorites[userId]) {
+        dataStore.userFavorites[userId] = [];
+      }
+      dataStore.userFavorites[userId].push(fave);
+      res.send(fave);
     } else {
-        resp.status(400).send({ error: 'Wrong parameters!' });
+      res.status(400).send({ error: 'Wrong parameters!' });
     }
-}
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-function delFav(req, resp) {
+/**
+ * Delete favorite
+ */
+app.delete('/delfav/:gameId', (req, res) => {
+  try {
     if (req.params.gameId && req.body.userId) {
-        let i = indexOf(req.params.gameId, req.body.userId)
-        if (i != -1) {
-            favourite[req.body.userId].splice(i, 1)
-            resp.send("OK")
-        } else resp.send({ error: 'No avaible ID!' })
-    } else resp.status(400).send({ error: "Missing paramters!" })
-}
-
-function indexOf(id, userId) {
-    let i = 0; while (i < favourite[userId].length && favourite[userId][i].gameId != id) i++;
-    if (i < favourite[userId].length) return i; else return -1
-}
-
-async function getGaminNews(req, resp) {
-    try {
-        const response = await fetch("https://newsapi.org/v2/everything?q=Gaming&apiKey=58cd8c33334d4de7a425f8a1c08a3a35");
-        const data = await response.json();
-        resp.json(data);
-    } catch (error) {
-        resp.status(500).json({ error: error.message });
+      let i = findIndex(dataStore.userFavorites[req.body.userId] || [], fav => fav.gameId == req.params.gameId);
+      if (i != -1) {
+        dataStore.userFavorites[req.body.userId].splice(i, 1);
+        res.send('OK');
+      } else {
+        res.send({ error: 'No avaible ID!' });
+      }
+    } else {
+      res.status(400).send({ error: 'Missing paramters!' });
     }
-}
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-let reviewsData = {}; let nextReviewId = 1;
+// ━━━━━━━━━━━━━━━━ REVIEWS ENDPOINTS ━━━━━━━━━━━━━━━━
 
-function saveReview(req, resp) {
+/**
+ * Get all reviews
+ */
+app.get('/get-all-reviews', (req, res) => {
+  try {
+    let allReviews = [];
+    for (let gameId in dataStore.reviews) {
+      allReviews = allReviews.concat(dataStore.reviews[gameId]);
+    }
+    res.json(allReviews);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Submit review
+ */
+app.post('/submit-review', (req, res) => {
+  try {
     const { gameId, userId, email, reviewText, rating, gameName } = req.body;
     const newReview = {
-        id: nextReviewId,
-        gameId,
-        gameName,
-        userId,
-        email,
-        review: reviewText,
-        rating,
-        createdAt: new Date(),
+      id: nextId.review,
+      gameId,
+      gameName,
+      userId,
+      email,
+      review: reviewText,
+      rating,
+      createdAt: new Date()
     };
-    if (!reviewsData[gameId]) { reviewsData[gameId] = []; }
-    reviewsData[gameId].push(newReview);
-    nextReviewId++;
-    resp.send(newReview);
-}
-
-function getAllReviews(req, resp) {
-    let allReviews = [];
-    for (let gameId in reviewsData) {
-        allReviews = allReviews.concat(reviewsData[gameId]);
+    if (!dataStore.reviews[gameId]) {
+      dataStore.reviews[gameId] = [];
     }
-    resp.json(allReviews);
-}
-
-/* ------------------------------------------------------------------------------- Movies ---------------------------------------------------------------------------------------------*/
-
-async function getMovies(req, resp) {
-    try {
-        const options = {
-            method: 'GET',
-            headers: {
-                accept: 'application/json',
-                Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-            }
-        };
-
-        const response = await fetch('https://api.themoviedb.org/3/trending/all/day?language=en-US', options);
-        const data = await response.json();
-        resp.json(data);
-    } catch (error) {
-        resp.status(500).json({ error: error.message });
-    }
-}
-
-async function searchMovies(req, resp) {
-    try {
-        const options = {
-            method: 'GET',
-            headers: {
-                accept: 'application/json',
-                Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-            }
-        };
-
-        const response = await fetch(`https://api.themoviedb.org/3/search/movie?query=${req.params.movies}&include_adult=false&language=en-US&page=1`, options);
-        const data = await response.json();
-        resp.json(data);
-    } catch (error) {
-        resp.status(500).json({ error: error.message });
-    }
-}
-
-async function getTrendingMovies(req, res) {
-    const options = {
-        method: 'GET',
-        headers: {
-            accept: 'application/json',
-            Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-        }
-    };
-
-    try {
-        const response = await fetch('https://api.themoviedb.org/3/trending/movie/day?language=en-US', options);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        console.error('Error fetching trending movies:', error);
-        res.status(500).json({ error: 'Failed to fetch trending movies' });
-    }
-}
-
-async function getNowPlayingMovies(req, res) {
-    const options = {
-        method: 'GET',
-        headers: {
-            accept: 'application/json',
-            Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-        }
-    };
-
-    try {
-        const response = await fetch('https://api.themoviedb.org/3/movie/now_playing?language=en-US&page=1', options);
-
-        if (!response.ok) {
-            throw new Error(`TMDB API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        res.status(200).json({
-            success: true,
-            data: data
-        });
-
-    } catch (error) {
-        console.error('Error fetching now playing movies:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to fetch now playing movies'
-        });
-    }
-}
-
-async function getUpcomingMovies(req, res) {
-    const options = {
-        method: 'GET',
-        headers: {
-            accept: 'application/json',
-            Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-        }
-    };
-
-    try {
-        const response = await fetch('https://api.themoviedb.org/3/movie/upcoming?language=en-US&page=1', options);
-
-        if (!response.ok) {
-            throw new Error(`TMDB API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        res.status(200).json({
-            success: true,
-            data: data
-        });
-
-    } catch (error) {
-        console.error('Error fetching upcoming movies:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to fetch upcoming movies'
-        });
-    }
-}
-
-async function getTopRatedMovies(req, res) {
-    const options = {
-        method: 'GET',
-        headers: {
-            accept: 'application/json',
-            Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjMjhmMTk5YWU4M2FhYTYxNDAxZDZlMWI0M2Y4ZjM1NyIsIm5iZiI6MTc0NDcyNjU4NC4wMjcsInN1YiI6IjY3ZmU2YTM4MzExMGJkODJkZmFkNzM0ZiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7R6_JBsq6LjkgIUc-q7Z5JRSdiEuB8uimKEQEyAj-Xk'
-        }
-    };
-
-    try {
-        const response = await fetch('https://api.themoviedb.org/3/movie/top_rated?language=en-US&page=1', options);
-
-        if (!response.ok) {
-            throw new Error(`TMDB API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        res.status(200).json({
-            success: true,
-            data: data
-        });
-
-    } catch (error) {
-        console.error('Error fetching top rated movies:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to fetch top rated movies'
-        });
-    }
-}
-
-//------------------------------------------------------------------------------------------- Dead By Daylight -------------------------------------------------------------------------------------------------------------------------------------------------
-
-async function getDbdCharatchers(req, res) {
-    res.json(dbdCharacters);
-}
-
-
-async function getDbdCharatchersK(req, res) {
-    res.json(dbdCharactersK);
-}
-
-
-let survivorPerksS = [];
-let killerPerksK = [];
-function loadPerkData() {
-    return new Promise((resolve, reject) => {
-        fs.readFile('survivorperks.json', 'utf-8', (error, data) => {
-            try {
-                survivorPerksS = JSON.parse(data); 
-                fs.readFile('killerperks.json', 'utf-8', (error, data) => {
-                    try {
-                        killerPerksK = JSON.parse(data);
-                        resolve();
-                    } catch (parseError) {
-                        reject(parseError);
-                    }
-                });
-            } catch (parseError) {
-                reject(parseError);
-            }
-        });
-    });
-}
-loadPerkData();
-
-async function getDbdPerksSByName(req, res) {
-    try {
-        const perkName = req.params.name.toLowerCase();
-        const perk = survivorPerksS.find(p => p.name.toLowerCase() == perkName);
-        
-        if (perk) {
-            res.json(perk);
-        } else {
-            res.status(404).json({ error: "Survivor perk not found" });
-        }
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-async function getDbdPerksKByName(req, res) {
-    try {
-        const perkName = req.params.name.toLowerCase();
-        const perk = killerPerksK.find(p => p.name.toLowerCase() == perkName);
-        
-        if (perk) {
-            res.json(perk);
-        } else {
-            res.status(404).json({ error: "Killer perk not found" });
-        }
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-
-async function getDbdEvents(req, res) {
-    try {
-        const response = await fetch("https://dbd.tricky.lol/api/events");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-
-async function getDbdAddons(req, res) {
-    try {
-        const response = await fetch("https://dbd.tricky.lol/api/addons");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-async function getDbdDlc(req, res) {
-    try {
-        const response = await fetch("https://dbd.tricky.lol/api/dlc");
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-
-async function getDbdPerkByName(req, res) {
-    try {
-        const response = await fetch("https://dbd.tricky.lol/api/perkinfo?perk="+req.params.name);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}
-
-//------------------------------------------------------------------------------------------- Végpontok -------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-app.get("/", (req, res) => res.send("<h1>It's all good :)</h1>"));
-app.get("/health", (req, res) => res.status(200).send("Alive"));
-app.get('/get-all-reviews', getAllReviews);
-app.get("/getgamingnews", getGaminNews);
-app.get("/discounted", getDiscounted);
-app.get("/fetch-games", fetchGames);
-app.get("/getFav", getUserFavs);
-app.get("/stores", getSores);
-app.get("/getlive", getLive);
-app.get("/game", getGames);
-app.get("/news", getNews);
-app.get("/free", getFree);
-app.get("/loot", getLoot);
-
-app.get("/movies", getMovies);
-app.get('/search/:movies', searchMovies);
-app.get('/trending-movies', getTrendingMovies);
-app.get('/movies/now-playing', getNowPlayingMovies);
-app.get('/upcoming-movies', getUpcomingMovies);
-app.get('/top-rated-movies', getTopRatedMovies);
-
-app.get("/characters", getDbdCharatchers);
-app.get("/charactersK", getDbdCharatchersK);
-app.get('/perksS/:name', getDbdPerksSByName);
-app.get('/perksK/:name', getDbdPerksKByName);
-app.get('/events', getDbdEvents);
-app.get('/addons', getDbdAddons);
-app.get('/dlc', getDbdDlc);
-app.get('/perks/:name', getDbdPerkByName);
-
-app.use((req, res, next) => { res.set('Cache-Control', 'public, max-age=3600'); next(); });
-
-app.post('/submit-review', saveReview);
-app.delete("/delfav/:gameId", delFav);
-app.post("/addfav", saveFav);
-
-app.listen(PORT, () => {
-    console.log(`Server running on port :${PORT}`);
+    dataStore.reviews[gameId].push(newReview);
+    nextId.review++;
+    res.send(newReview);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
+
+// ━━━━━━━━━━━━━━━━ MOVIE ENDPOINTS ━━━━━━━━━━━━━━━━
+
+/**
+ * Helper function for TMDB requests
+ */
+async function fetchTMDBData(endpoint, cacheTime = config.cache.movies) {
+  const options = {
+    headers: {
+      accept: 'application/json',
+      Authorization: `Bearer ${config.apis.tmdb.token}`
+    }
+  };
+  const url = `${config.apis.tmdb.baseUrl}${endpoint}`;
+  return fetchAPI(url, options, cacheTime);
+}
+
+/**
+ * Get trending movies
+ */
+app.get('/movies', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const data = await fetchTMDBData('/trending/all/day?language=en-US');
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Search movies
+ */
+app.get('/search/:movies', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const { movies } = req.params;
+    const data = await fetchTMDBData(`/search/movie?query=${movies}&include_adult=false&language=en-US&page=1`);
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get trending movies
+ */
+app.get('/trending-movies', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const data = await fetchTMDBData('/trending/movie/day?language=en-US');
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get now playing movies
+ */
+app.get('/movies/now-playing', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const data = await fetchTMDBData('/movie/now_playing?language=en-US&page=1');
+    if (data && !data.success) {
+      res.status(200).json({
+        success: true,
+        data: data
+      });
+    } else {
+      res.json(data);
+    }
+  } catch (error) {
+    console.error('Error fetching now playing movies:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch now playing movies'
+    });
+  }
+});
+
+/**
+ * Get upcoming movies
+ */
+app.get('/upcoming-movies', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const data = await fetchTMDBData('/movie/upcoming?language=en-US&page=1');
+    if (data && !data.success) {
+      res.status(200).json({
+        success: true,
+        data: data
+      });
+    } else {
+      res.json(data);
+    }
+  } catch (error) {
+    console.error('Error fetching upcoming movies:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch upcoming movies'
+    });
+  }
+});
+
+/**
+ * Get top rated movies
+ */
+app.get('/top-rated-movies', cacheMiddleware(config.cache.movies), async (req, res) => {
+  try {
+    const data = await fetchTMDBData('/movie/top_rated?language=en-US&page=1');
+    if (data && !data.success) {
+      res.status(200).json({
+        success: true,
+        data: data
+      });
+    } else {
+      res.json(data);
+    }
+  } catch (error) {
+    console.error('Error fetching top rated movies:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch top rated movies'
+    });
+  }
+});
+
+// ━━━━━━━━━━━━━━━━ DEAD BY DAYLIGHT ENDPOINTS ━━━━━━━━━━━━━━━━
+
+/**
+ * Get all survivors
+ */
+app.get('/characters', (req, res) => {
+  res.json(dataStore.survivors);
+});
+
+/**
+ * Get all killers
+ */
+app.get('/charactersK', (req, res) => {
+  res.json(dataStore.killers);
+});
+
+/**
+ * Get survivor perks by name
+ */
+app.get('/perksS/:name', (req, res) => {
+  try {
+    const perkName = req.params.name.toLowerCase();
+    const perk = dataStore.survivorPerks.find(p => p.name.toLowerCase() == perkName);
+    
+    if (perk) {
+      res.json(perk);
+    } else {
+      res.status(404).json({ error: "Survivor perk not found" });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get killer perks by name
+ */
+app.get('/perksK/:name', (req, res) => {
+  try {
+    const perkName = req.params.name.toLowerCase();
+    const perk = dataStore.killerPerks.find(p => p.name.toLowerCase() == perkName);
+    
+    if (perk) {
+      res.json(perk);
+    } else {
+      res.status(404).json({ error: "Killer perk not found" });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get DBD events
+ */
+app.get('/events', cacheMiddleware(config.cache.dbd), async (req, res) => {
+  try {
+    const data = await fetchAPI(`${config.apis.dbd.url}/events`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get DBD addons
+ */
+app.get('/addons', cacheMiddleware(config.cache.dbd), async (req, res) => {
+  try {
+    const data = await fetchAPI(`${config.apis.dbd.url}/addons`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get DBD DLC
+ */
+app.get('/dlc', cacheMiddleware(config.cache.dbd), async (req, res) => {
+  try {
+    const data = await fetchAPI(`${config.apis.dbd.url}/dlc`);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get perk info from external API
+ */
+app.get('/perks/:name', cacheMiddleware(config.cache.dbd), async (req, res) => {
+  try {
+    const response = await fetchAPI(`${config.apis.dbd.url}/perkinfo?perk=` + req.params.name);
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ━━━━━━━━━━━━━━━━ HEALTH & STATUS ENDPOINTS ━━━━━━━━━━━━━━━━
+
+/**
+ * Health check
+ */
+app.get('/health', (req, res) => {
+  res.status(200).send('Alive');
+});
+
+/**
+ * Root endpoint
+ */
+app.get('/', (req, res) => {
+  res.send('<h1>Welcome to GameHub Backend</h1><p>API is running. Visit <a href="/health">/health</a> for status.</p>');
+});
+
+// ━━━━━━━━━━━━━━━━ ERROR HANDLING ━━━━━━━━━━━━━━━━
+
+/**
+ * 404 handler
+ */
+app.use((req, res) => {
+  res.status(404).json(errorResponse(new Error('Route not found'), 'Endpoint not found'));
+});
+
+/**
+ * Global error handler
+ */
+app.use((error, req, res, next) => {
+  console.error('Unhandled error:', error);
+  res.status(500).json(errorResponse(error, 'Internal server error'));
+});
+
+// ━━━━━━━━━━━━━━━━ SERVER INITIALIZATION ━━━━━━━━━━━━━━━━
+
+/**
+ * Start the server
+ */
+async function startServer() {
+  try {
+    // Load all data before starting server
+    await loadAllData();
+
+    app.listen(config.port, () => {
+      console.log(`\n✓ Server is running on port ${config.port}`);
+      console.log(`✓ Mode: ${config.nodeEnv}`);
+      console.log(`✓ Cache enabled for external APIs (TTL: ${config.cache.externalApi}s)`);
+      console.log(`✓ Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('\nGraceful shutdown initiated...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('\nServer stopped');
+  process.exit(0);
+});
+
+// Start the server
+startServer();
