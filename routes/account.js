@@ -67,11 +67,12 @@ export default function register(app, ctx) {
     const db = getDb();
     try {
       const userRef = db.collection('users').doc(uid);
-      const [userSnap, subcollections, publicProfile, publicBanner, secrets] = await Promise.all([
+      const [userSnap, subcollections, publicProfile, publicBanner, publicGames, secrets] = await Promise.all([
         userRef.get(),
         userRef.listCollections(),
         db.collection('publicProfiles').doc(uid).get(),
         db.collection('publicBanners').doc(uid).get(),
+        db.collection('publicGames').doc(uid).get(),
         db.collection('platformSecrets').doc(uid).get(),
       ]);
 
@@ -118,6 +119,7 @@ export default function register(app, ctx) {
         account,
         publicProfile: publicProfile.exists ? plain(publicProfile.data()) : null,
         publicBanner: publicBanner.exists ? plain(publicBanner.data()) : null,
+        publicGames: publicGames.exists ? plain(publicGames.data()) : null,
         storedPlatformKeys: Object.fromEntries(['xbox', 'psn'].filter(p => secretData[p]).map(p => [p, `stored encrypted since ${secretData[p].savedAt || 'unknown'}`])),
         reviews,
         activity,
@@ -186,7 +188,7 @@ export default function register(app, ctx) {
       counts.outageReports = await deleteDocs(await docsOf(db.collection('outageReports').where('uid', '==', uid)));
       counts.reports = await deleteDocs(await docsOf(db.collection('reports').where('uid', '==', uid)));
 
-      await Promise.all(['publicProfiles', 'publicBanners', 'platformSecrets'].map(name => db.collection(name).doc(uid).delete().catch(() => {})));
+      await Promise.all(['publicProfiles', 'publicBanners', 'publicGames', 'platformSecrets'].map(name => db.collection(name).doc(uid).delete().catch(() => {})));
       await db.recursiveDelete(db.collection('users').doc(uid));
       await admin.auth().deleteUser(uid);
 
