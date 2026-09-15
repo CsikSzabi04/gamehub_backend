@@ -15,8 +15,9 @@ import subscriptions from './subscriptions.js';
 import serviceStatus from './serviceStatus.js';
 import reviews from './reviews.js';
 import social from './social.js';
+import platforms from './platforms.js';
 
-const MODULES = { notifications, prices, gameInfo, library, releases, subscriptions, serviceStatus, reviews, social };
+const MODULES = { notifications, prices, gameInfo, library, releases, subscriptions, serviceStatus, reviews, social, platforms };
 
 /**
  * @param {import('express').Express} app
