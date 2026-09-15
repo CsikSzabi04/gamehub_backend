@@ -24,12 +24,27 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const hours = minutes => Math.round(((minutes || 0) / 60) * 10) / 10;
 const headerImage = appid => `${STEAM_CDN}steam/apps/${appid}/header.jpg`;
 
-async function steamJson(url) {
-  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
+/** Steam Web API JSON. Network errors, timeouts and 5xx are retried once (Steam drops requests now and then). */
+async function steamJson(url, attempt = 0) {
+  let res;
+  try {
+    res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
+  } catch (error) {
+    if (attempt === 0) return steamJson(url, 1);
+    throw httpError(502, 'upstream', `Steam: ${error.name === 'AbortError' ? 'timeout' : error.message}`);
+  }
   if (res.status === 401 || res.status === 403) throw httpError(403, 'private', `Steam: HTTP ${res.status}`);
   if (res.status === 429) throw httpError(429, 'rate_limited', 'Steam rate limit');
+  if (res.status >= 500 && attempt === 0) {
+    await sleep(800);
+    return steamJson(url, 1);
+  }
   if (!res.ok) throw httpError(502, 'upstream', `Steam: HTTP ${res.status}`);
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw httpError(502, 'upstream', 'Steam: invalid JSON');
+  }
 }
 
 /** Tiny LRU with TTL for per-user responses (the shared cache never evicts). */
@@ -353,9 +368,9 @@ export default function register(app, ctx) {
   /* ───────── Routes ───────── */
 
   const guard = (res, error, label) => {
+    console.error(`${label}:`, error.status || '', error.code || '', error.message);
     if (error.status) return fail(res, error.status, error.code, error.message);
-    console.error(`${label}:`, error.message);
-    return fail(res, 502, 'upstream', 'Steam is not responding, try again later');
+    return res.status(502).json({ code: 'upstream', error: 'Steam is not responding, try again later', detail: String(error.message || '').slice(0, 200) });
   };
 
   app.get('/steam/me', requireUser, async (req, res) => {

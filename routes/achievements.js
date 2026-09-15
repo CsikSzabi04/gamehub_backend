@@ -274,8 +274,9 @@ export default function register(app, ctx) {
     const promise = performSync(uid, platform, credential)
       .catch(async error => {
         const code = error.code || 'upstream';
-        if (!error.code) console.error(`achievement sync ${platform}:`, error.message);
-        await setStatus(uid, platform, { status: 'error', error: code, lastErrorAt: new Date().toISOString() });
+        console.error(`achievement sync ${platform}:`, code, error.message);
+        // errorDetail helps debugging from the Firestore console; it never contains credentials
+        await setStatus(uid, platform, { status: 'error', error: code, errorDetail: String(error.message || '').slice(0, 200), lastErrorAt: new Date().toISOString() });
         // A stored key stopped working (PSN NPSSO expires after ~2 months): forget it and tell the user once
         if (code === 'invalid_credentials' && !credential && platform !== 'steam') {
           await deleteSecret(uid, platform);
