@@ -19,7 +19,7 @@ function rateLimited(req) {
   return recent.length > 20;
 }
 
-async function fetchWithTimeout(url, options = {}) {
+export async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT);
   try {
@@ -70,7 +70,21 @@ const PSN_CLIENT_ID = '09515159-7237-4370-9b40-3806e67c0891';
 const PSN_BASIC = 'MDk1MTUxNTktNzIzNy00MzcwLTliNDAtMzgwNmU2N2MwODkxOnVjUGprYTV0bnRCMktxc1A=';
 const PSN_REDIRECT = 'com.scee.psxandroid.scecompcall://redirect';
 
-async function psnAccessToken(npsso) {
+/** Raw input -> OpenXBL key, or '' when malformed. */
+export function cleanXboxKey(value) {
+  const apiKey = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9-]{16,100}$/.test(apiKey) ? apiKey : '';
+}
+
+/** Raw input (token or Sony's whole {"npsso":"..."} JSON) -> NPSSO, or '' when malformed. */
+export function cleanNpsso(value) {
+  let npsso = typeof value === 'string' ? value.trim() : '';
+  const fromJson = /"npsso"\s*:\s*"([^"]+)"/.exec(npsso);
+  if (fromJson) npsso = fromJson[1];
+  return /^[A-Za-z0-9]{40,100}$/.test(npsso) ? npsso : '';
+}
+
+export async function psnAccessToken(npsso) {
   const params = new URLSearchParams({
     access_type: 'offline',
     client_id: PSN_CLIENT_ID,
@@ -136,8 +150,8 @@ async function psnTitles(npsso) {
 export default function register(app) {
   app.post('/xbox/titles', async (req, res) => {
     if (rateLimited(req)) return fail(res, 429, 'rate_limited', 'Too many imports, try again later');
-    const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : '';
-    if (!/^[A-Za-z0-9-]{16,100}$/.test(apiKey)) return fail(res, 400, 'invalid_input', 'Missing or malformed OpenXBL API key');
+    const apiKey = cleanXboxKey(req.body?.apiKey);
+    if (!apiKey) return fail(res, 400, 'invalid_input', 'Missing or malformed OpenXBL API key');
     try {
       res.set('Cache-Control', 'no-store');
       res.json(await xboxTitles(apiKey));
@@ -149,11 +163,8 @@ export default function register(app) {
 
   app.post('/psn/titles', async (req, res) => {
     if (rateLimited(req)) return fail(res, 429, 'rate_limited', 'Too many imports, try again later');
-    // Users sometimes paste the whole {"npsso":"..."} JSON from Sony's page
-    let npsso = typeof req.body?.npsso === 'string' ? req.body.npsso.trim() : '';
-    const fromJson = /"npsso"\s*:\s*"([^"]+)"/.exec(npsso);
-    if (fromJson) npsso = fromJson[1];
-    if (!/^[A-Za-z0-9]{40,100}$/.test(npsso)) return fail(res, 400, 'invalid_input', 'Missing or malformed NPSSO token');
+    const npsso = cleanNpsso(req.body?.npsso);
+    if (!npsso) return fail(res, 400, 'invalid_input', 'Missing or malformed NPSSO token');
     try {
       res.set('Cache-Control', 'no-store');
       res.json(await psnTitles(npsso));

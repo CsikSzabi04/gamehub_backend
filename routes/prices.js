@@ -3,6 +3,7 @@
 //   GET /price/steam/:appid?cc=hu   Steam price in a region (+ IsThereAnyDeal history/lows when ITAD_API_KEY is set)
 //   GET /price/search?title=&cc=    IsThereAnyDeal only: best current deal + historical low for non-Steam games
 //   job priceAlerts (every 6h)      checks users/{uid}/priceAlerts/{gameKey} and notifies when the target is reached
+//                                   mode 'target' (default): price <= targetPrice; mode 'sale': discount >= minDiscount (1 = any sale)
 //
 // Env: ITAD_API_KEY (optional). Firestore via Firebase Admin (optional, the job skips without it).
 
@@ -15,7 +16,7 @@ export const PRICE_REGIONS = ['hu', 'us', 'gb', 'de', 'at', 'fr', 'it', 'es', 'n
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const itadReady = () => Boolean(env.ITAD_API_KEY);
-const normCc = value => {
+export const normCc = value => {
   const cc = String(value || 'hu').toLowerCase();
   return PRICE_REGIONS.includes(cc) ? cc : null;
 };
@@ -41,7 +42,7 @@ const toCurrent = p => (p ? {
  * Steam prices for many appids in one request (appdetails accepts a list of appids with filters=price_overview).
  * @returns {Promise<Map<number, { success: boolean, price: object|null }>>}
  */
-async function steamPrices(fetchAPI, appids, cc) {
+export async function steamPrices(fetchAPI, appids, cc) {
   const data = await fetchAPI(`https://store.steampowered.com/api/appdetails?appids=${appids.join(',')}&cc=${cc}&filters=price_overview`, {}, 20000);
   const map = new Map();
   for (const appid of appids) {
@@ -184,7 +185,8 @@ export default function register(app, ctx) {
     const snap = await db.collectionGroup('priceAlerts').get();
     const alerts = snap.docs
       .map(doc => ({ doc, uid: doc.ref.parent.parent?.id, data: doc.data() }))
-      .filter(a => a.uid && a.data.active !== false && Number(a.data.steamAppId) > 0 && Number(a.data.targetPrice) > 0);
+      .filter(a => a.uid && a.data.active !== false && Number(a.data.steamAppId) > 0
+        && (a.data.mode === 'sale' || Number(a.data.targetPrice) > 0));
 
     const byCc = new Map();
     for (const alert of alerts) {
@@ -214,20 +216,25 @@ export default function register(app, ctx) {
         const price = prices.get(Number(data.steamAppId))?.price;
         if (!price) continue;
         checked++;
+        const saleMode = data.mode === 'sale';
         const target = Number(data.targetPrice);
+        const minDiscount = Math.min(95, Math.max(1, Number(data.minDiscount) || 1));
         const lastNotified = typeof data.lastNotifiedPrice === 'number' ? data.lastNotifiedPrice : null;
-        const currencyOk = !data.currency || data.currency === price.currency;
-        const update = { lastPrice: price.final, lastCheckedAt: Timestamp.now() };
+        const currencyOk = saleMode || !data.currency || data.currency === price.currency;
+        const update = { lastPrice: price.final, lastDiscount: price.discount || 0, lastCheckedAt: Timestamp.now() };
         if (!data.currency) update.currency = price.currency;
+        const reached = saleMode ? price.discount >= minDiscount : price.final <= target;
 
-        if (currencyOk && price.final <= target && (lastNotified == null || price.final < lastNotified)) {
+        if (currencyOk && reached && (lastNotified == null || price.final < lastNotified)) {
           const name = String(data.name || `Steam app ${data.steamAppId}`).slice(0, 80);
           const priceText = price.formatted || `${price.final} ${price.currency}`;
           try {
             await sendToUser(uid, {
               type: 'priceAlerts',
-              title: `Price drop: ${name}`,
-              body: `Now ${priceText}${price.discount ? ` (-${price.discount}%)` : ''}, your target was ${target} ${price.currency}.`,
+              title: saleMode ? `On sale: ${name}` : `Price drop: ${name}`,
+              body: saleMode
+                ? `-${price.discount}%, now ${priceText}.${data.source === 'wishlist' ? ' (from your Steam wishlist)' : ''}`
+                : `Now ${priceText}${price.discount ? ` (-${price.discount}%)` : ''}, your target was ${target} ${price.currency}.`,
               url: `/game/steam/${data.steamAppId}`,
               image: typeof data.image === 'string' && /^https?:\/\//.test(data.image)
                 ? data.image
@@ -240,8 +247,8 @@ export default function register(app, ctx) {
           }
           update.lastNotifiedPrice = price.final;
           update.triggeredAt = Timestamp.now();
-        } else if (lastNotified != null && price.final > target) {
-          // back above the target: the next drop notifies again
+        } else if (lastNotified != null && !reached) {
+          // back above the target / sale over: the next drop notifies again
           update.lastNotifiedPrice = null;
         }
         await doc.ref.update(update).catch(error => console.error('priceAlerts: update failed:', error.message));
