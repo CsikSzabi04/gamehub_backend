@@ -28,6 +28,22 @@ services:
       - key: TMDB_API_TOKEN
         sync: false
       
+      # Community features (see gamehub-main/COMMUNITY_SETUP.md in the frontend repo)
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: STEAM_API_KEY
+        sync: false
+      - key: ITAD_API_KEY
+        sync: false
+
       # Cache Duration
       - key: CACHE_DURATION_EXTERNAL_API
         value: "600"

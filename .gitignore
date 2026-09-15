@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.*.local
+
+# Firebase service account keys (never commit)
+*firebase-adminsdk*.json
+serviceAccount*.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.pid.lock
+*.seed
+
+# Coverage and testing
+coverage/
+.nyc_output/
+.coverage
+
+# Build and dist
+build/
+dist/
+
+# Cache
+.cache/
+*.cache
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+pnpm-lock.yaml.bak
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

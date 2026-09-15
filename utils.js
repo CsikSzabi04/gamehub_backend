@@ -1,17 +1,18 @@
-import fetch from 'node-fetch';
+const USER_AGENT = 'GameDataHub/1.0 (+https://gamedatahub.netlify.app)';
 
 /**
- * Safe API request with error handling and timeout
+ * Safe API request with error handling and timeout (ms).
+ * Uses Node's built-in fetch (Node 18+).
  */
-export async function fetchAPI(url, options = {}, timeout = 10000) {
+export async function fetchAPI(url, options = {}, timeout = 15000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
     const response = await fetch(url, {
       ...options,
-      signal: controller.signal,
-      timeout
+      headers: { 'User-Agent': USER_AGENT, accept: 'application/json', ...options.headers },
+      signal: controller.signal
     });
 
     if (!response.ok) {

@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { cache, cacheMiddleware } from './cache.js';
 import { fetchAPI, errorResponse, successResponse, validateInput, safeJsonParse, findIndex } from './utils.js';
+import { registerHubRoutes } from './hubRoutes.js';
+import { registerCommunityRoutes, startJobTimer } from './routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,12 +24,46 @@ app.use(compression());
 app.use(express.json());
 app.use(cors(config.cors));
 
-// Cache middleware for GET requests
+// Default: user-specific data (favorites, reviews) must never be cached by browsers/CDNs.
+// Cached external-data routes override this below.
 app.use((req, res, next) => {
-  if (req.method === 'GET') {
-    res.set('Cache-Control', 'public, max-age=3600');
-  }
+  res.set('Cache-Control', 'no-store');
   next();
+});
+
+// ━━━━━━━━━━━━━━━━ CACHED EXTERNAL ROUTES ━━━━━━━━━━━━━━━━
+
+const cachedRoutes = [];
+
+/**
+ * Registers a GET route whose response comes from the stale-while-revalidate cache.
+ * The loader is only called on first use or in the background once the TTL expires.
+ */
+function cachedRoute(routePath, ttl, loader, { warm = true } = {}) {
+  const key = `route:${routePath}`;
+  if (warm) cachedRoutes.push({ key, ttl, loader, routePath });
+
+  app.get(routePath, async (req, res) => {
+    try {
+      const entry = await cache.swr(key, ttl, loader);
+      const etag = `W/"${entry.expiresAt.toString(36)}-${entry.body.length.toString(36)}"`;
+      res.set({
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': `public, max-age=${Math.min(ttl, 300)}, stale-while-revalidate=86400`,
+        'X-Cache': Date.now() > entry.expiresAt ? 'STALE' : 'HIT',
+        ETag: etag
+      });
+      if (req.headers['if-none-match'] === etag) return res.status(304).end();
+      res.send(entry.body);
+    } catch (error) {
+      res.set('Cache-Control', 'no-store');
+      res.status(502).json({ error: error.message });
+    }
+  });
+}
+
+const rapidOptions = host => ({
+  headers: { 'x-rapidapi-key': config.apis.rapid.key, 'x-rapidapi-host': host }
 });
 
 // ━━━━━━━━━━━━━━━━ DATA STORAGE ━━━━━━━━━━━━━━━━
@@ -36,17 +72,14 @@ const dataStore = {
   survivors: [],
   killers: [],
   survivorPerks: [],
-  killerPerks: [],
-  userFavorites: {},
-  reviews: {}
+  killerPerks: []
 };
 
 let nextId = {
   survivor: 0,
   killer: 0,
   survivorPerk: 0,
-  killerPerk: 0,
-  review: 1
+  killerPerk: 0
 };
 
 // ━━━━━━━━━━━━━━━━ DATA LOADING ━━━━━━━━━━━━━━━━
@@ -144,6 +177,10 @@ async function loadAllData() {
       };
     });
 
+    // Serialize once instead of on every request
+    staticJson.survivors = JSON.stringify(dataStore.survivors);
+    staticJson.killers = JSON.stringify(dataStore.killers);
+
     console.log(`✓ Loaded ${dataStore.survivors.length} survivors`);
     console.log(`✓ Loaded ${dataStore.killers.length} killers`);
     console.log(`✓ Loaded ${dataStore.survivorPerks.length} survivor perks`);
@@ -160,25 +197,18 @@ async function loadAllData() {
 /**
  * Fetch popular games from RAWG API
  */
-app.get('/fetch-games', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const data = await fetchAPI(`${config.apis.rawg.url}?key=${config.apis.rawg.key}`);
-    res.json({ games: data.results });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+cachedRoute('/fetch-games', config.cache.externalApi, async () => {
+  const data = await fetchAPI(`${config.apis.rawg.url}?key=${config.apis.rawg.key}`);
+  return { games: data.results };
 });
 
 /**
  * Get digital stores
  */
-app.get('/stores', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const data = await fetchAPI(`${config.apis.cheapshark.url}/stores`);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+cachedRoute('/stores', 86400, async () => {
+  const data = await fetchAPI(`${config.apis.cheapshark.url}/stores`);
+  if (!Array.isArray(data)) throw new Error('Unexpected stores response');
+  return data;
 });
 
 /**
@@ -199,211 +229,80 @@ app.get('/game', cacheMiddleware(config.cache.externalApi), async (req, res) => 
 /**
  * Get MMO games news
  */
-app.get('/news', cacheMiddleware(config.cache.news), async (req, res) => {
-  try {
-    const options = {
-      headers: {
-        'x-rapidapi-key': config.apis.rapid.key,
-        'x-rapidapi-host': config.apis.rapid.hosts.mmo
-      }
-    };
-    const url = 'https://mmo-games.p.rapidapi.com/games';
-    const data = await fetchAPI(url, options, config.cache.news);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+cachedRoute('/news', config.cache.news, async () => {
+  const data = await fetchAPI('https://mmo-games.p.rapidapi.com/games', rapidOptions(config.apis.rapid.hosts.mmo));
+  // The home page carousel only needs the first few dozen entries (full list is ~220 kB)
+  return Array.isArray(data) ? data.slice(0, 50) : data;
 });
 
 /**
  * Get free-to-play games
  */
-app.get('/free', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const options = {
-      headers: {
-        'x-rapidapi-key': config.apis.rapid.key,
-        'x-rapidapi-host': config.apis.rapid.hosts.games
-      }
-    };
-    const url = 'https://free-to-play-games-database.p.rapidapi.com/api/games';
-    const data = await fetchAPI(url, options, config.cache.externalApi);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+cachedRoute('/free', config.cache.externalApi, () =>
+  fetchAPI('https://free-to-play-games-database.p.rapidapi.com/api/games', rapidOptions(config.apis.rapid.hosts.games))
+);
 
 /**
  * Get loot offers
  */
-app.get('/loot', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const options = {
-      headers: {
-        'x-rapidapi-key': config.apis.rapid.key,
-        'x-rapidapi-host': config.apis.rapid.hosts.loot
-      }
-    };
-    const url = 'https://gamerpower.p.rapidapi.com/api/filter?platform=epic-games-store.steam.android&type=game.loot';
-    const data = await fetchAPI(url, options, config.cache.externalApi);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+cachedRoute('/loot', config.cache.externalApi, () =>
+  fetchAPI(
+    'https://gamerpower.p.rapidapi.com/api/filter?platform=epic-games-store.steam.android&type=game.loot',
+    rapidOptions(config.apis.rapid.hosts.loot)
+  )
+);
 
 /**
- * Get live esports matches
+ * Get live esports matches (short TTL: live data, not pre-warmed)
  */
-app.get('/getlive', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const options = {
-      headers: {
-        'x-rapidapi-key': config.apis.rapid.key,
-        'x-rapidapi-host': config.apis.rapid.hosts.sports
-      }
-    };
-    const url = 'https://allsportsapi2.p.rapidapi.com/api/esport/matches/live';
-    const data = await fetchAPI(url, options, config.cache.externalApi);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+cachedRoute('/getlive', 60, () =>
+  fetchAPI('https://allsportsapi2.p.rapidapi.com/api/esport/matches/live', rapidOptions(config.apis.rapid.hosts.sports)),
+  { warm: false }
+);
 
 /**
  * Get Epic Games discounted games
  */
-app.get('/discounted', cacheMiddleware(config.cache.externalApi), async (req, res) => {
-  try {
-    const data = await fetchAPI(config.apis.epicgames.url);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+cachedRoute('/discounted', config.cache.externalApi, () => fetchAPI(config.apis.epicgames.url));
 
 /**
  * Get gaming news
  */
-app.get('/getgamingnews', cacheMiddleware(config.cache.news), async (req, res) => {
-  try {
-    const url = `https://newsapi.org/v2/everything?q=Gaming&apiKey=${config.apis.newsapi.key}`;
-    const data = await fetchAPI(url, {}, config.cache.news);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+cachedRoute('/getgamingnews', config.cache.news, async () => {
+  const data = await fetchAPI(`https://newsapi.org/v2/everything?q=Gaming&apiKey=${config.apis.newsapi.key}`);
+  // Only the fields the frontend renders; the raw payload includes full article content
+  return {
+    status: data.status,
+    totalResults: data.totalResults,
+    articles: (data.articles || []).slice(0, 40).map(a => ({
+      url: a.url,
+      title: a.title,
+      description: a.description,
+      urlToImage: a.urlToImage,
+      author: a.author,
+      publishedAt: a.publishedAt,
+      source: a.source
+    }))
+  };
 });
 
-// ━━━━━━━━━━━━━━━━ FAVORITES ENDPOINTS ━━━━━━━━━━━━━━━━
+// Fresh store data (Steam, GOG, Speedrun, ...) and per-game universes, see hubRoutes.js
+registerHubRoutes(app, cachedRoute);
 
-/**
- * Get user favorites
- */
-app.get('/getFav', (req, res) => {
-  try {
-    const { userId } = req.query;
-    const favorites = dataStore.userFavorites[userId] || [];
-    res.send(favorites);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Notifications, price alerts, library, LFG helpers, reviews ... see routes/index.js
+registerCommunityRoutes(app, { cachedRoute });
 
-/**
- * Add favorite game
- */
-app.post('/addfav', (req, res) => {
-  try {
-    const { name, userId, gameId } = req.body;
-    if (name && userId && gameId) {
-      const fave = { gameId: gameId, name: name };
-      if (!dataStore.userFavorites[userId]) {
-        dataStore.userFavorites[userId] = [];
-      }
-      dataStore.userFavorites[userId].push(fave);
-      res.send(fave);
-    } else {
-      res.status(400).send({ error: 'Wrong parameters!' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// ━━━━━━━━━━━━━━━━ FAVORITES & REVIEWS ENDPOINTS ━━━━━━━━━━━━━━━━
 
-/**
- * Delete favorite
- */
-app.delete('/delfav/:gameId', (req, res) => {
-  try {
-    if (req.params.gameId && req.body.userId) {
-      let i = findIndex(dataStore.userFavorites[req.body.userId] || [], fav => fav.gameId == req.params.gameId);
-      if (i != -1) {
-        dataStore.userFavorites[req.body.userId].splice(i, 1);
-        res.send('OK');
-      } else {
-        res.send({ error: 'No avaible ID!' });
-      }
-    } else {
-      res.status(400).send({ error: 'Missing paramters!' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ━━━━━━━━━━━━━━━━ REVIEWS ENDPOINTS ━━━━━━━━━━━━━━━━
-
-/**
- * Get all reviews
- */
-app.get('/get-all-reviews', (req, res) => {
-  try {
-    let allReviews = [];
-    for (let gameId in dataStore.reviews) {
-      allReviews = allReviews.concat(dataStore.reviews[gameId]);
-    }
-    res.json(allReviews);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * Submit review
- */
-app.post('/submit-review', (req, res) => {
-  try {
-    const { gameId, userId, email, reviewText, rating, gameName } = req.body;
-    const newReview = {
-      id: nextId.review,
-      gameId,
-      gameName,
-      userId,
-      email,
-      review: reviewText,
-      rating,
-      createdAt: new Date()
-    };
-    if (!dataStore.reviews[gameId]) {
-      dataStore.reviews[gameId] = [];
-    }
-    dataStore.reviews[gameId].push(newReview);
-    nextId.review++;
-    res.send(newReview);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// /getFav, /addfav, /delfav/:gameId, /get-all-reviews, /submit-review and the /reviews API live in
+// routes/reviews.js (Firestore-backed via lib/reviewsStore.js, in-memory without Firebase Admin).
 
 // ━━━━━━━━━━━━━━━━ MOVIE ENDPOINTS ━━━━━━━━━━━━━━━━
 
 /**
  * Helper function for TMDB requests
  */
-async function fetchTMDBData(endpoint, cacheTime = config.cache.movies) {
+async function fetchTMDBData(endpoint) {
   const options = {
     headers: {
       accept: 'application/json',
@@ -411,21 +310,13 @@ async function fetchTMDBData(endpoint, cacheTime = config.cache.movies) {
     }
   };
   const url = `${config.apis.tmdb.baseUrl}${endpoint}`;
-  return fetchAPI(url, options, cacheTime);
+  return fetchAPI(url, options);
 }
 
 /**
  * Get trending movies
  */
-app.get('/movies', cacheMiddleware(config.cache.movies), async (req, res) => {
-  try {
-    const data = await fetchTMDBData('/trending/all/day?language=en-US');
-    res.json(data);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
+cachedRoute('/movies', config.cache.movies, () => fetchTMDBData('/trending/all/day?language=en-US'));
 
 /**
  * Search movies
@@ -433,7 +324,7 @@ app.get('/movies', cacheMiddleware(config.cache.movies), async (req, res) => {
 app.get('/search/:movies', cacheMiddleware(config.cache.movies), async (req, res) => {
   try {
     const { movies } = req.params;
-    const data = await fetchTMDBData(`/search/movie?query=${movies}&include_adult=false&language=en-US&page=1`);
+    const data = await fetchTMDBData(`/search/movie?query=${encodeURIComponent(movies)}&include_adult=false&language=en-US&page=1`);
     res.json(data);
   } catch (error) {
     console.error(error);
@@ -528,15 +419,20 @@ app.get('/top-rated-movies', cacheMiddleware(config.cache.movies), async (req, r
 /**
  * Get all survivors
  */
+const staticJson = { survivors: '[]', killers: '[]' };
+const STATIC_CACHE = 'public, max-age=3600, stale-while-revalidate=604800';
+
 app.get('/characters', (req, res) => {
-  res.json(dataStore.survivors);
+  res.set({ 'Cache-Control': STATIC_CACHE, 'Content-Type': 'application/json; charset=utf-8' });
+  res.send(staticJson.survivors);
 });
 
 /**
  * Get all killers
  */
 app.get('/charactersK', (req, res) => {
-  res.json(dataStore.killers);
+  res.set({ 'Cache-Control': STATIC_CACHE, 'Content-Type': 'application/json; charset=utf-8' });
+  res.send(staticJson.killers);
 });
 
 /**
@@ -671,10 +567,34 @@ async function startServer() {
       console.log(`✓ Mode: ${config.nodeEnv}`);
       console.log(`✓ Cache enabled for external APIs (TTL: ${config.cache.externalApi}s)`);
       console.log(`✓ Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n`);
+      warmCaches();
+      startJobTimer();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
+  }
+}
+
+/**
+ * Preload every cached route right after boot, so visitors always get an
+ * in-memory answer. After that, stale entries are refreshed in the background
+ * when they are requested (no timer, to protect the RapidAPI/NewsAPI quotas).
+ */
+function warmCaches() {
+  Promise.allSettled(cachedRoutes.map(r => cache.refresh(r.key, r.ttl, r.loader))).then(results => {
+    const failed = results
+      .map((r, i) => (r.status === 'rejected' ? cachedRoutes[i].routePath : null))
+      .filter(Boolean);
+    console.log(`✓ Warmed ${results.length - failed.length}/${results.length} caches${failed.length ? ` (failed: ${failed.join(', ')})` : ''}`);
+  });
+
+  // Render free instances sleep after 15 min without traffic (30-60 s cold start).
+  // Render sets RENDER_EXTERNAL_URL automatically; pinging ourselves keeps the instance awake.
+  const selfUrl = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl && process.env.KEEP_ALIVE !== 'false') {
+    setInterval(() => fetch(`${selfUrl}/health`).catch(() => {}), 10 * 60 * 1000).unref();
+    console.log(`✓ Keep-alive ping enabled for ${selfUrl}`);
   }
 }
 
