@@ -44,6 +44,9 @@ services:
       # Encrypts stored Xbox / PlayStation keys for achievement auto-sync (any long random string)
       - key: PLATFORM_TOKEN_KEY
         sync: false
+      # Firebase uids (comma separated) that get a push notification about new server/browser errors
+      - key: ADMIN_UIDS
+        sync: false
       - key: ITAD_API_KEY
         sync: false
 

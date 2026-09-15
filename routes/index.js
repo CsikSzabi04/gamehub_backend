@@ -18,8 +18,9 @@ import social from './social.js';
 import platforms from './platforms.js';
 import achievements from './achievements.js';
 import steamAccount from './steamAccount.js';
+import account from './account.js';
 
-const MODULES = { notifications, prices, gameInfo, library, releases, subscriptions, serviceStatus, reviews, social, platforms, achievements, steamAccount };
+const MODULES = { notifications, prices, gameInfo, library, releases, subscriptions, serviceStatus, reviews, social, platforms, achievements, steamAccount, account };
 
 /**
  * @param {import('express').Express} app

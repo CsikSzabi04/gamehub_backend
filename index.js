@@ -10,6 +10,11 @@ import { cache, cacheMiddleware } from './cache.js';
 import { fetchAPI, errorResponse, successResponse, validateInput, safeJsonParse, findIndex } from './utils.js';
 import { registerHubRoutes } from './hubRoutes.js';
 import { registerCommunityRoutes, startJobTimer } from './routes/index.js';
+import { capture5xx, errorMiddleware, installProcessHandlers, registerMonitorRoutes, startupSelfCheck } from './lib/monitor.js';
+import { listJobs, registerJob } from './lib/jobs.js';
+import { withSnapshot } from './lib/persistentCache.js';
+
+installProcessHandlers();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,10 +24,42 @@ const app = express();
 
 // ━━━━━━━━━━━━━━━━ MIDDLEWARE ━━━━━━━━━━━━━━━━
 
+app.disable('x-powered-by');
+app.set('trust proxy', 1); // Render sits in front: req.ip is the visitor
+
 // Performance middleware - order matters!
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: '200kb' }));
 app.use(cors(config.cors));
+
+// Security headers (an API: nothing may frame it or sniff content types)
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'Strict-Transport-Security': 'max-age=15552000; includeSubDomains',
+  });
+  next();
+});
+
+// Writes (POST/PUT/PATCH/DELETE): at most 90 per minute per IP. Reads stay unlimited (cached).
+const writeHits = new Map();
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || req.path === '/cron/run') return next();
+  const now = Date.now();
+  const ip = req.ip || 'unknown';
+  const recent = (writeHits.get(ip) || []).filter(t => now - t < 60 * 1000);
+  recent.push(now);
+  writeHits.set(ip, recent);
+  if (writeHits.size > 10000) writeHits.delete(writeHits.keys().next().value);
+  if (recent.length > 90) return res.status(429).json({ code: 'rate_limited', error: 'Too many requests, slow down' });
+  next();
+});
+
+// Every 5xx answer is recorded in errorLogs (lib/monitor.js)
+app.use(capture5xx);
 
 // Default: user-specific data (favorites, reviews) must never be cached by browsers/CDNs.
 // Cached external-data routes override this below.
@@ -39,8 +76,10 @@ const cachedRoutes = [];
  * Registers a GET route whose response comes from the stale-while-revalidate cache.
  * The loader is only called on first use or in the background once the TTL expires.
  */
-function cachedRoute(routePath, ttl, loader, { warm = true } = {}) {
+function cachedRoute(routePath, ttl, rawLoader, { warm = true } = {}) {
   const key = `route:${routePath}`;
+  // A restarted instance can still answer from the last good copy when the upstream API is down
+  const loader = withSnapshot(key, rawLoader);
   if (warm) cachedRoutes.push({ key, ttl, loader, routePath });
 
   app.get(routePath, async (req, res) => {
@@ -528,6 +567,9 @@ app.get('/health', (req, res) => {
   res.status(200).send('Alive');
 });
 
+// /health/deep, /client-errors, /admin/errors
+registerMonitorRoutes(app, { listJobs, registerJob });
+
 /**
  * Root endpoint
  */
@@ -545,12 +587,9 @@ app.use((req, res) => {
 });
 
 /**
- * Global error handler
+ * Global error handler (logs + records in errorLogs)
  */
-app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json(errorResponse(error, 'Internal server error'));
-});
+app.use(errorMiddleware);
 
 // ━━━━━━━━━━━━━━━━ SERVER INITIALIZATION ━━━━━━━━━━━━━━━━
 
@@ -569,6 +608,7 @@ async function startServer() {
       console.log(`✓ Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n`);
       warmCaches();
       startJobTimer();
+      startupSelfCheck();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
